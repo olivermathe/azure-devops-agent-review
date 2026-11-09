@@ -4,8 +4,8 @@ import { sanitizeAzureRemoteUrl } from '../src/git/git.service.js';
 
 test('remove o username informativo da remoteUrl do Azure DevOps', () => {
   assert.equal(
-    sanitizeAzureRemoteUrl('https://StixFidelidade@dev.azure.com/StixFidelidade/Projetos/_git/repo'),
-    'https://dev.azure.com/StixFidelidade/Projetos/_git/repo',
+    sanitizeAzureRemoteUrl('https://OrgName@dev.azure.com/OrgName/Projetos/_git/repo'),
+    'https://dev.azure.com/OrgName/Projetos/_git/repo',
   );
 });
 

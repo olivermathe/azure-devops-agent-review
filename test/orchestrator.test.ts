@@ -39,7 +39,7 @@ test('erro em um Work Item não interrompe o processamento dos demais', async ()
 });
 
 test('campo livre aceita um ou vários nomes e URLs sem confundir prefixos', () => {
-  assert.equal(repositoryMatchesField('stix-accrual-notifier', 'stix-accrual-notifier'), true);
+  assert.equal(repositoryMatchesField('notifier', 'notifier'), true);
   assert.equal(repositoryMatchesField('repo-a, repo-b\nrepo-c', 'repo-b'), true);
   assert.equal(repositoryMatchesField('https://dev.azure.com/org/proj/_git/repo%2Durl', 'repo-url'), true);
   assert.equal(repositoryMatchesField('repo-with-suffix', 'repo'), false);
