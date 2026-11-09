@@ -1,0 +1,7 @@
+.env
+node_modules/
+reports/
+dist/
+.review-state.json
+.review-state.json.*.tmp
+review-prompt.md
