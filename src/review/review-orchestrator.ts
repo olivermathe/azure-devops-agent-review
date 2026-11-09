@@ -68,6 +68,14 @@ export class ReviewOrchestrator {
       }
       results.push(result);
     }
+    if (!items.length && this.teams?.shouldNotifyNoWorkItems()) {
+      try {
+        await this.teams.notifyNoWorkItems();
+        this.log.info('Aviso de nenhuma tarefa encontrada enviado ao Teams');
+      } catch (error) {
+        this.log.error('Falha ao enviar aviso de nenhuma tarefa ao Teams', { error: (error as Error).message });
+      }
+    }
     if (!this.config.dryRun) await this.store.save();
     await this.reports.writeIndex(results);
     this.log.info('Execução concluída', { reports: this.config.reportsDir });

@@ -175,6 +175,35 @@ export function buildTeamsPayload(config: Config, result: WorkItemResult): Recor
   };
 }
 
+export function buildNoWorkItemsPayload(config: Config): Record<string, unknown> {
+  const boardUrl = `https://dev.azure.com/${encodeURIComponent(config.org)}/${encodeURIComponent(config.project)}/_boards/board/t/${encodeURIComponent(config.team)}/${encodeURIComponent(config.board)}`;
+  const card = {
+    $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+    type: 'AdaptiveCard',
+    version: '1.2',
+    msteams: { width: 'Full' },
+    body: [
+      { type: 'TextBlock', text: 'Code Review', size: 'Large', weight: 'Bolder', wrap: true },
+      {
+        type: 'TextBlock',
+        text: `Nenhuma tarefa foi encontrada na coluna ${config.column} com estado ${config.state}.`,
+        wrap: true,
+        spacing: 'Medium',
+      },
+    ],
+    actions: [{ type: 'Action.OpenUrl', title: 'Abrir board', url: boardUrl }],
+  };
+  if (config.teamsPayloadFormat === 'adaptive-card') return card;
+  return {
+    type: 'message',
+    attachments: [{
+      contentType: 'application/vnd.microsoft.card.adaptive',
+      contentUrl: null,
+      content: card,
+    }],
+  };
+}
+
 export class TeamsService {
   constructor(private readonly config: Config) {}
 
@@ -185,11 +214,24 @@ export class TeamsService {
     return false;
   }
 
+  shouldNotifyNoWorkItems(): boolean {
+    return this.config.teamsEnabled && !this.config.dryRun;
+  }
+
   async notify(result: WorkItemResult): Promise<void> {
     if (!this.shouldNotify(result)) return;
+    await this.post(buildTeamsPayload(this.config, result));
+  }
+
+  async notifyNoWorkItems(): Promise<void> {
+    if (!this.shouldNotifyNoWorkItems()) return;
+    await this.post(buildNoWorkItemsPayload(this.config));
+  }
+
+  private async post(payload: Record<string, unknown>): Promise<void> {
     const webhook = this.config.teamsWebhookUrl;
     if (!webhook) throw new Error('Webhook do Teams não configurado');
-    const body = JSON.stringify(buildTeamsPayload(this.config, result));
+    const body = JSON.stringify(payload);
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const controller = new AbortController();

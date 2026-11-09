@@ -63,7 +63,7 @@ Com `AZDO_FILTER_BY_REPOSITORY_FIELD=true`, somente PRs e commits cujos reposit�
 
 Crie no canal um workflow baseado no gatilho **When a Teams webhook request is received** ou no modelo **Send webhook alerts to a channel**. Copie a URL gerada para `TEAMS_WEBHOOK_URL` e habilite `TEAMS_NOTIFICATION_ENABLED=true`.
 
-O script publica um Adaptive Card 1.2 por Work Item, com status, severidades, links para Work Item e PR e o resultado técnico. Use `TEAMS_PAYLOAD_FORMAT=workflow-envelope` para o envelope oficial `type: message`; use `adaptive-card` quando a ação **Post card in a chat or channel** recebe diretamente o body do gatilho. Mensagens são limitadas antes do teto do Teams; conteúdo excedente é truncado. O DRY_RUN nunca envia notificações. Falhas no webhook usam retry com backoff e são registradas sem interromper outras revisões. A URL é um segredo: não a versione nem a compartilhe em logs.
+O script publica um Adaptive Card 1.2 por Work Item, com status, severidades, links para Work Item e PR e o resultado técnico. Quando a consulta não encontra nenhum Work Item, publica um card informando que não há tarefas para revisar; esse aviso independe de `TEAMS_NOTIFY_ON_SUCCESS`. Use `TEAMS_PAYLOAD_FORMAT=workflow-envelope` para o envelope oficial `type: message`; use `adaptive-card` quando a ação **Post card in a chat or channel** recebe diretamente o body do gatilho. O DRY_RUN nunca envia notificações. Falhas no webhook usam retry com backoff e são registradas sem interromper outras revisões. A URL é um segredo: não a versione nem a compartilhe em logs.
 
 ## Execução
 

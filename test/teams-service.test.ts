@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readConfig, redactedConfig } from '../src/config/env.js';
-import { buildTeamsPayload, parseReviewFindings, TeamsService } from '../src/teams/teams.service.js';
+import { buildNoWorkItemsPayload, buildTeamsPayload, parseReviewFindings, TeamsService } from '../src/teams/teams.service.js';
 import type { WorkItemResult } from '../src/types.js';
 
 const config = readConfig({
@@ -78,10 +78,22 @@ test('envia o Adaptive Card bruto quando a ação do fluxo consome o body inteir
 });
 
 test('não envia em dry-run e nunca expõe webhook na configuração redigida', () => {
-  assert.equal(new TeamsService({ ...config, dryRun: true }).shouldNotify(result), false);
+  const dryRunService = new TeamsService({ ...config, dryRun: true });
+  assert.equal(dryRunService.shouldNotify(result), false);
+  assert.equal(dryRunService.shouldNotifyNoWorkItems(), false);
   const redacted = redactedConfig(config);
   assert.equal(redacted.teamsWebhookUrl, '<redacted>');
   assert.equal(JSON.stringify(redacted).includes('secret'), false);
+});
+
+test('cria card e habilita aviso quando nenhum Work Item é encontrado', () => {
+  assert.equal(new TeamsService(config).shouldNotifyNoWorkItems(), true);
+  const payload = buildNoWorkItemsPayload({ ...config, teamsPayloadFormat: 'adaptive-card' }) as {
+    type: string; body: Array<{ text?: string }>;
+  };
+  assert.equal(payload.type, 'AdaptiveCard');
+  assert.match(payload.body.map((block) => block.text).join(' '), /Nenhuma tarefa foi encontrada/);
+  assert.match(payload.body.map((block) => block.text).join(' '), /Staff/);
 });
 
 test('exige webhook HTTPS quando notificações estão habilitadas', () => {
