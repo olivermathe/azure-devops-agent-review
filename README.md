@@ -21,7 +21,7 @@ cp .env.example .env
 Preencha o `.env`:
 
 ```dotenv
-AZDO_ORG=StixFidelidade
+AZDO_ORG=OrgName
 AZDO_PROJECT=Projetos
 AZDO_TEAM=Nome do Time
 AZDO_BOARD=Nome do Board
