@@ -93,6 +93,15 @@ export class WorkItemService {
       const fieldList = await this.client.request<{ value?: FieldReference[] }>('/_apis/wit/fields?api-version=7.1');
       repositoryField = resolveFieldReference(fieldList.value ?? [], this.config.repositoryField);
     }
+    if (this.config.workItemId !== undefined) {
+      const item = await this.client.request<WorkItem>(
+        `/_apis/wit/workitems/${this.config.workItemId}?%24expand=relations&api-version=7.1`,
+      );
+      const columnField = configuredColumnField
+        ?? Object.keys(item.fields).find((field) => /^WEF_.+_Kanban\.Column$/i.test(field))
+        ?? '';
+      return { items: [item], columnField, repositoryField };
+    }
     const boardPath = `/${encode(this.config.team)}/_apis/work/boards/${encode(resolvedBoard.id)}/columns?api-version=7.1`;
     const columns = await this.client.request<{ value?: Array<{ name: string }> }>(boardPath);
     if (!columns.value?.some((entry) => entry.name === this.config.column)) {

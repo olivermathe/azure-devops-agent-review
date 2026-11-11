@@ -28,19 +28,36 @@ export function sanitizeAzureRemoteUrl(remote: string): string {
   return url.toString();
 }
 
+export function sanitizeAzureSshUrl(remote: string): string {
+  const scpStyle = /^git@ssh\.dev\.azure\.com:v3\/([^/\0\r\n]+)\/([^/\0\r\n]+)\/([^/\0\r\n]+)$/;
+  const urlStyle = /^ssh:\/\/git@ssh\.dev\.azure\.com\/v3\/([^/\0\r\n]+)\/([^/\0\r\n]+)\/([^/\0\r\n]+)$/;
+  if (!scpStyle.test(remote) && !urlStyle.test(remote)) {
+    throw new Error('URL SSH remota do Azure DevOps é inválida ou não permitida');
+  }
+  return remote;
+}
+
 export class GitService {
   constructor(private readonly config: Config, private readonly authorization: string) {}
 
   private async git(args: string[], cwd?: string): Promise<string> {
+    const authentication = this.config.gitCloneProtocol === 'https'
+      ? {
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'http.extraheader',
+          GIT_CONFIG_VALUE_0: `AUTHORIZATION: ${this.authorization}`,
+        }
+      : {
+          GIT_CONFIG_COUNT: '0',
+          GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+        };
     const result = await exec('git', args, {
       cwd,
       timeout: this.config.timeoutMs,
       maxBuffer: Math.max(this.config.maxDiffBytes * 2, 16 * 1024 * 1024),
       env: {
         ...process.env,
-        GIT_CONFIG_COUNT: '1',
-        GIT_CONFIG_KEY_0: 'http.extraheader',
-        GIT_CONFIG_VALUE_0: `AUTHORIZATION: ${this.authorization}`,
+        ...authentication,
         GIT_TERMINAL_PROMPT: '0',
       },
     });
@@ -48,7 +65,12 @@ export class GitService {
   }
 
   async clone(target: ReviewTarget, destination: string): Promise<void> {
-    const remote = sanitizeAzureRemoteUrl(target.repository.remoteUrl);
+    if (this.config.gitCloneProtocol === 'ssh' && !target.repository.sshUrl) {
+      throw new Error(`Repositório ${target.repository.name} não forneceu sshUrl pela API do Azure DevOps`);
+    }
+    const remote = this.config.gitCloneProtocol === 'ssh'
+      ? sanitizeAzureSshUrl(target.repository.sshUrl!)
+      : sanitizeAzureRemoteUrl(target.repository.remoteUrl);
     await this.git(['clone', '--quiet', '--no-checkout', '--', remote, destination]);
   }
 

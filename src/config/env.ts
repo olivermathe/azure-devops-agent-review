@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 export type Config = {
+  reviewCli: 'kiro' | 'claude' | 'codex';
+  gitCloneProtocol: 'https' | 'ssh';
   org: string;
   project: string;
   team: string;
@@ -9,6 +11,7 @@ export type Config = {
   column: string;
   state: string;
   workItemTypes: '*' | string[];
+  workItemId?: number;
   filterByRepositoryField: boolean;
   repositoryField: string;
   prTargetBranches: '*' | string[];
@@ -18,6 +21,7 @@ export type Config = {
   teamsPayloadFormat: 'workflow-envelope' | 'adaptive-card';
   teamsNotifyOnSuccess: boolean;
   teamsNotifyOnError: boolean;
+  htmlReportEnabled: boolean;
   columnField?: string;
   areaPath?: string;
   pat: string;
@@ -76,6 +80,18 @@ function teamsPayloadFormat(env: NodeJS.ProcessEnv): 'workflow-envelope' | 'adap
   throw new Error('TEAMS_PAYLOAD_FORMAT deve ser workflow-envelope ou adaptive-card');
 }
 
+function reviewCli(env: NodeJS.ProcessEnv): Config['reviewCli'] {
+  const value = env.REVIEW_CLI?.trim().toLowerCase() || 'kiro';
+  if (value === 'kiro' || value === 'claude' || value === 'codex') return value;
+  throw new Error('REVIEW_CLI deve ser kiro, claude ou codex');
+}
+
+function gitCloneProtocol(env: NodeJS.ProcessEnv): Config['gitCloneProtocol'] {
+  const value = env.GIT_CLONE_PROTOCOL?.trim().toLowerCase() || 'https';
+  if (value === 'https' || value === 'ssh') return value;
+  throw new Error('GIT_CLONE_PROTOCOL deve ser https ou ssh');
+}
+
 export function parseWorkItemTypes(raw: string): '*' | string[] {
   const value = raw.trim();
   if (value === '*') return '*';
@@ -108,6 +124,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (url.protocol !== 'https:') throw new Error('TEAMS_WEBHOOK_URL deve usar HTTPS');
   }
   return {
+    reviewCli: reviewCli(env),
+    gitCloneProtocol: gitCloneProtocol(env),
     org: required(env, 'AZDO_ORG'),
     project: required(env, 'AZDO_PROJECT'),
     team: required(env, 'AZDO_TEAM'),
@@ -118,12 +136,15 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     filterByRepositoryField: boolean(env, 'AZDO_FILTER_BY_REPOSITORY_FIELD', false),
     repositoryField: env.AZDO_REPOSITORY_FIELD?.trim() || 'URL Repository',
     prTargetBranches: parsePrTargetBranches(env.AZDO_PR_TARGET_BRANCHES?.trim() || '*'),
-    customPromptFile: env.KIRO_CUSTOM_PROMPT_FILE?.trim() ? resolve(env.KIRO_CUSTOM_PROMPT_FILE.trim()) : undefined,
+    customPromptFile: (env.REVIEW_CUSTOM_PROMPT_FILE?.trim() || env.KIRO_CUSTOM_PROMPT_FILE?.trim())
+      ? resolve((env.REVIEW_CUSTOM_PROMPT_FILE?.trim() || env.KIRO_CUSTOM_PROMPT_FILE?.trim())!)
+      : undefined,
     teamsEnabled,
     teamsWebhookUrl,
     teamsPayloadFormat: teamsPayloadFormat(env),
     teamsNotifyOnSuccess: boolean(env, 'TEAMS_NOTIFY_ON_SUCCESS', true),
     teamsNotifyOnError: boolean(env, 'TEAMS_NOTIFY_ON_ERROR', true),
+    htmlReportEnabled: boolean(env, 'HTML_REPORT_ENABLED', true),
     columnField: env.AZDO_BOARD_COLUMN_FIELD?.trim() || undefined,
     areaPath: env.AZDO_AREA_PATH?.trim() || undefined,
     pat: required(env, 'AZDO_PAT'),

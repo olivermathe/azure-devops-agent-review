@@ -5,14 +5,16 @@ import type { Config } from '../config/env.js';
 import { GitRelationsService } from '../azure-devops/git-relations.js';
 import { parseGitRelations, WorkItemService } from '../azure-devops/work-items.js';
 import { GitService } from '../git/git.service.js';
-import { KiroService } from '../kiro/kiro.service.js';
 import { buildReviewPrompt, loadCustomReviewPrompt, reviewRulesVersion } from '../kiro/review-prompt.js';
 import type { Logger } from '../logger.js';
-import { MarkdownService, countFindings } from '../reports/markdown.service.js';
+import { MarkdownService } from '../reports/markdown.service.js';
 import type { ArtifactReview, ReviewTarget, WorkItem, WorkItemResult } from '../types.js';
 import { emptyCounts } from '../types.js';
 import type { TeamsService } from '../teams/teams.service.js';
 import { reviewKey, ReviewStore } from './review-store.js';
+import type { ReviewCliService } from '../review-cli/review-cli.service.js';
+import { countAnalysisFindings, isReviewAnalysis, parseReviewAnalysis, renderReviewMarkdown } from './review-result.js';
+import { pullRequestLineUrl } from '../azure-devops/links.js';
 
 export function repositoryMatchesField(fieldValue: unknown, repositoryName: string): boolean {
   if (typeof fieldValue !== 'string' || !fieldValue.trim() || !repositoryName.trim()) return false;
@@ -38,7 +40,7 @@ export class ReviewOrchestrator {
     private readonly workItems: WorkItemService,
     private readonly relations: GitRelationsService,
     private readonly git: GitService,
-    private readonly kiro: KiroService,
+    private readonly reviewCli: ReviewCliService,
     private readonly reports: MarkdownService,
     private readonly store: ReviewStore,
     private readonly log: Logger,
@@ -47,13 +49,16 @@ export class ReviewOrchestrator {
 
   async run(): Promise<WorkItemResult[]> {
     this.customPrompt = await loadCustomReviewPrompt(this.config.customPromptFile);
-    this.rulesVersion = reviewRulesVersion(this.customPrompt);
-    if (this.customPrompt) this.log.info('Prompt personalizado do Kiro carregado', { file: this.config.customPromptFile });
+    this.rulesVersion = `${reviewRulesVersion(this.customPrompt)}:cli:${this.reviewCli.name}`;
+    if (this.customPrompt) this.log.info('Prompt personalizado da revisão carregado', { file: this.config.customPromptFile });
     this.log.info('Consultando Azure DevOps...');
+    if (this.config.workItemId !== undefined) {
+      this.log.info(`Modo Work Item específico ativado: #${this.config.workItemId}; filtros de coluna, estado e tipo serão ignorados`);
+    }
     const { items, columnField, repositoryField } = await this.workItems.find();
     this.log.info(`${items.length} Work Item(s) encontrado(s) na coluna configurada`);
     await this.store.load();
-    if (!this.config.dryRun) this.log.info(`Kiro disponível: ${await this.kiro.validate()}`);
+    if (!this.config.dryRun) this.log.info(`${this.reviewCli.name} disponível: ${await this.reviewCli.validate()}`);
     const results: WorkItemResult[] = [];
     for (const item of items) {
       const result = await this.processWorkItem(item, repositoryField);
@@ -78,6 +83,7 @@ export class ReviewOrchestrator {
     }
     if (!this.config.dryRun) await this.store.save();
     await this.reports.writeIndex(results);
+    if (this.config.htmlReportEnabled) await this.reports.writeHtml(results);
     this.log.info('Execução concluída', { reports: this.config.reportsDir });
     return results;
   }
@@ -155,8 +161,11 @@ export class ReviewOrchestrator {
     if (!this.config.force) {
       const cached = this.store.get(key);
       if (cached) {
-        this.log.info(`Reutilizando revisão válida de ${target.kind} ${target.id}`);
-        return { ...cached, status: 'cached' };
+        if (isReviewAnalysis(cached.analysis)) {
+          this.log.info(`Reutilizando revisão válida de ${target.kind} ${target.id}`);
+          return { ...cached, status: 'cached' };
+        }
+        this.log.warn(`Cache incompatível de ${target.kind} ${target.id}; a revisão será refeita`);
       }
     }
     if (this.config.dryRun) {
@@ -166,7 +175,7 @@ export class ReviewOrchestrator {
     const temporary = await mkdtemp(join(tmpdir(), 'azdo-kiro-review-'));
     try {
       const repositoryPath = join(temporary, 'repository');
-      const safeContextPath = join(temporary, 'kiro-context');
+      const safeContextPath = join(temporary, 'review-context');
       await mkdir(safeContextPath);
       this.log.info(`Clonando ${target.repository.name}...`);
       await this.git.clone(target, repositoryPath);
@@ -180,10 +189,12 @@ export class ReviewOrchestrator {
         contexts.push({ path, content });
         contextBytes += Buffer.byteLength(content);
       }
-      this.log.info(`Executando Kiro para ${target.kind} ${target.id}...`);
-      const markdown = await this.kiro.review(buildReviewPrompt(item, target, diff, contexts, this.customPrompt), safeContextPath);
+      this.log.info(`Executando ${this.reviewCli.name} para ${target.kind} ${target.id}...`);
+      const output = await this.reviewCli.review(buildReviewPrompt(item, target, diff, contexts, this.customPrompt), safeContextPath);
+      const analysis = parseReviewAnalysis(output);
+      const markdown = renderReviewMarkdown(analysis, (location) => pullRequestLineUrl(this.config, target, location));
       const review: ArtifactReview = {
-        target, status: 'reviewed', markdown, files: diff.files, stats: diff.stats, counts: countFindings(markdown),
+        target, status: 'reviewed', analysis, markdown, files: diff.files, stats: diff.stats, counts: countAnalysisFindings(analysis),
       };
       this.store.set(key, review);
       return review;

@@ -1,0 +1,47 @@
+
+> azure-devops-kiro-review@0.1.0 review
+> node --import tsx src/index.ts
+
+[INFO] Prompt personalizado da revisão carregado {"file":"/Users/matheusoliveiradeoliveira/Documents/projetos/azure-devops-kiro-review/review-prompt.md"}
+[INFO] Consultando Azure DevOps...
+[INFO] 1 Work Item(s) encontrado(s) na coluna configurada
+[INFO] kiro disponível: kiro-cli 3.1.0
+[INFO] Analisando Work Item #119089
+[INFO] Work Item #119089: filtro de repositório aplicado {"kept":4,"removed":0}
+[INFO] Work Item #119089: filtro de branch destino aplicado {"kept":2,"removed":2,"branches":["main"]}
+[INFO] Clonando stix-accrual-consumer-v3...
+[INFO] Executando kiro para pr 27421...
+[INFO] Clonando stix-accrual-producer-v3...
+[INFO] Executando kiro para pr 27512...
+[INFO] Resultado do Work Item #119089 enviado ao Teams
+[INFO] Execução concluída {"reports":"/Users/matheusoliveiradeoliveira/Documents/projetos/azure-devops-kiro-review/reports"}
+
+> azure-devops-kiro-review@0.1.0 review
+> node --import tsx src/index.ts
+
+[INFO] Prompt personalizado da revisão carregado {"file":"/Users/matheusoliveiradeoliveira/Documents/projetos/azure-devops-kiro-review/review-prompt.md"}
+[INFO] Consultando Azure DevOps...
+[INFO] 2 Work Item(s) encontrado(s) na coluna configurada
+[INFO] kiro disponível: kiro-cli 3.1.0
+[INFO] Analisando Work Item #115528
+[WARN] Work Item #115528: PR #27477 ignorado: status abandoned.
+[WARN] Work Item #115528: PR #27466 ignorado: status abandoned.
+[WARN] Work Item #115528: PR #27465 ignorado: status completed.
+[WARN] Work Item #115528: PR #27468 ignorado: status completed.
+[WARN] Work Item #115528: PR #27479 ignorado: status completed.
+[WARN] Work Item #115528: PR #27455 ignorado: status abandoned.
+[WARN] Work Item #115528: PR #27476 ignorado: status completed.
+[INFO] Work Item #115528: filtro de repositório aplicado {"kept":4,"removed":2}
+[INFO] Work Item #115528: filtro de branch destino aplicado {"kept":2,"removed":2,"branches":["main"]}
+[INFO] Clonando fidelizacao-accrual-notifier-persistence-lib...
+[INFO] Executando kiro para pr 27539...
+[INFO] Clonando stix-accrual-notifier...
+[INFO] Executando kiro para pr 27508...
+[INFO] Resultado do Work Item #115528 enviado ao Teams
+[INFO] Analisando Work Item #119089
+[INFO] Work Item #119089: filtro de repositório aplicado {"kept":4,"removed":0}
+[INFO] Work Item #119089: filtro de branch destino aplicado {"kept":2,"removed":2,"branches":["main"]}
+[INFO] Reutilizando revisão válida de pr 27421
+[INFO] Reutilizando revisão válida de pr 27512
+[INFO] Resultado do Work Item #119089 enviado ao Teams
+[INFO] Execução concluída {"reports":"/Users/matheusoliveiradeoliveira/Documents/projetos/azure-devops-kiro-review/reports"}

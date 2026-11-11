@@ -22,6 +22,7 @@ export type RepositoryInfo = {
   id: string;
   name: string;
   remoteUrl: string;
+  sshUrl?: string;
   webUrl?: string;
   project?: { id: string; name: string };
 };
@@ -54,10 +55,28 @@ export type FindingCounts = {
   informational: number;
 };
 
+export type ReviewSeverity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
+
+export type ReviewFinding = {
+  category: 'confirmed' | 'risk';
+  title: string;
+  severity: ReviewSeverity;
+  locations: Array<{ file: string; line: number; endLine?: number }>;
+  problem: string;
+  impact: string;
+  correction: string;
+};
+
+export type ReviewAnalysis = {
+  summary: string;
+  findings: ReviewFinding[];
+};
+
 export type ArtifactReview = {
   target: ReviewTarget;
   status: 'reviewed' | 'cached' | 'dry-run' | 'empty' | 'error';
   markdown?: string;
+  analysis?: ReviewAnalysis;
   files?: string[];
   stats?: string;
   error?: string;

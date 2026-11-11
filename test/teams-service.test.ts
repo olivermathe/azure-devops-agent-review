@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readConfig, redactedConfig } from '../src/config/env.js';
-import { buildNoWorkItemsPayload, buildTeamsPayload, parseReviewFindings, TeamsService } from '../src/teams/teams.service.js';
+import { buildNoWorkItemsPayload, buildTeamsPayload, buildTeamsPayloads, parseReviewFindings, TeamsService } from '../src/teams/teams.service.js';
 import type { WorkItemResult } from '../src/types.js';
 
 const config = readConfig({
@@ -66,6 +66,14 @@ test('encapsula o resultado em um Adaptive Card válido para o webhook do Workfl
   assert.doesNotMatch(serialized, /\*\*Observação:/);
   assert.doesNotMatch(serialized, /src\/modules\/example/);
   assert.match(serialized, /example\.service\.ts/);
+  const card = payload.attachments[0]?.content as unknown as {
+    body: Array<{ items?: Array<{ type?: string; id?: string; title?: string }> }>;
+    actions?: Array<{ type?: string }>;
+  };
+  const toggles = card.body.flatMap((block) => block.items ?? []).filter((item) => item.type === 'Input.Toggle');
+  assert.deepEqual(toggles.map((toggle) => toggle.id), ['finding-reviewed-1', 'finding-reviewed-2']);
+  assert.ok(toggles.every((toggle) => toggle.title === 'Revisado'));
+  assert.equal(card.actions?.some((action) => action.type === 'Action.Submit'), false);
 });
 
 test('envia o Adaptive Card bruto quando a ação do fluxo consome o body inteiro', () => {
@@ -75,6 +83,63 @@ test('envia o Adaptive Card bruto quando a ação do fluxo consome o body inteir
   assert.equal(payload.type, 'AdaptiveCard');
   assert.equal(payload.version, '1.2');
   assert.ok(payload.body.length);
+});
+
+test('monta o card do Teams diretamente do resultado JSON estruturado', () => {
+  const structured: WorkItemResult = {
+    ...result,
+    reviews: [{
+      ...result.reviews[0]!,
+      markdown: undefined,
+      analysis: {
+        summary: 'Resumo',
+        findings: [{
+          category: 'confirmed', severity: 'critical', title: 'Falha estrutural',
+          locations: [{ file: 'src/deep/structured.service.ts', line: 15 }], problem: 'Problema', impact: 'Impacto', correction: 'Correção',
+        }],
+      },
+    }],
+  };
+  const payload = buildTeamsPayload(config, structured);
+  const serialized = JSON.stringify(payload);
+  assert.match(serialized, /Falha estrutural/);
+  assert.match(serialized, /structured\.service\.ts/);
+  assert.doesNotMatch(serialized, /src\/deep/);
+  assert.match(serialized, /Crítica/);
+  assert.ok(serialized.includes('pullrequest/20?path=%2Fsrc%2Fdeep%2Fstructured.service.ts&line=15'));
+});
+
+test('não quebra com análise antiga do cache e usa o Markdown como fallback', () => {
+  const legacyCache: WorkItemResult = {
+    ...result,
+    reviews: [{
+      ...result.reviews[0]!,
+      analysis: {
+        summary: 'Formato antigo',
+        findings: [{ files: ['src/old.ts'], line: '10' }],
+      } as never,
+    }],
+  };
+  assert.doesNotThrow(() => buildTeamsPayload(config, legacyCache));
+  assert.match(JSON.stringify(buildTeamsPayload(config, legacyCache)), /Falha de validação/);
+});
+
+test('divide relatórios grandes em payloads menores que o limite do Teams', () => {
+  const largeReview = {
+    ...result.reviews[0]!,
+    markdown: Array.from({ length: 35 }, (_, index) => `### 2.${index + 1} Achado extenso ${index + 1}
+- **Severidade:** Média
+- **Arquivo:** \`src/muito/longo/example-${index}.service.ts\`
+- **Problema:** ${'Problema detalhado '.repeat(80)}
+- **Impacto:** ${'Impacto relevante '.repeat(50)}
+- **Correção sugerida:** ${'Correção objetiva '.repeat(60)}`).join('\n\n'),
+  };
+  const payloads = buildTeamsPayloads(config, { ...result, reviews: [largeReview] });
+  assert.ok(payloads.length > 1);
+  for (const payload of payloads) {
+    assert.ok(Buffer.byteLength(JSON.stringify(payload), 'utf8') < 28 * 1024);
+  }
+  assert.match(JSON.stringify(payloads[1]), /continuação 2/);
 });
 
 test('não envia em dry-run e nunca expõe webhook na configuração redigida', () => {

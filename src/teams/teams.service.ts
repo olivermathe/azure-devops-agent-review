@@ -1,8 +1,13 @@
 import type { Config } from '../config/env.js';
 import { posix } from 'node:path';
 import type { WorkItemResult } from '../types.js';
+import type { ReviewFinding } from '../types.js';
+import { isReviewAnalysis, severityLabels } from '../review/review-result.js';
+import { pullRequestLineUrl } from '../azure-devops/links.js';
+import type { ReviewTarget } from '../types.js';
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const MAX_TEAMS_PAYLOAD_BYTES = 24 * 1024;
 
 function oneLine(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
@@ -17,6 +22,7 @@ export type TeamsFinding = {
   problem?: string;
   impact?: string;
   correction?: string;
+  links?: Array<{ title: string; url: string }>;
 };
 
 function cleanMarkdown(value: string): string {
@@ -72,6 +78,23 @@ export function parseReviewFindings(markdown: string): TeamsFinding[] {
   return findings;
 }
 
+function structuredFinding(config: Config, target: ReviewTarget, finding: ReviewFinding): TeamsFinding {
+  return {
+    title: finding.title,
+    category: finding.category === 'risk' ? 'risk' : 'finding',
+    severity: severityLabels[finding.severity],
+    files: fileNames(finding.locations.map((location) => location.file).join(',')),
+    line: finding.locations.map((location) => `${location.line}${location.endLine ? `-${location.endLine}` : ''}`).join(', '),
+    problem: finding.problem,
+    impact: finding.impact,
+    correction: finding.correction,
+    links: finding.locations.flatMap((location) => {
+      const url = pullRequestLineUrl(config, target, location);
+      return url ? [{ title: `${posix.basename(location.file)}:${location.line}`, url }] : [];
+    }),
+  };
+}
+
 function truncate(value: string | undefined, limit: number): string | undefined {
   if (!value || value.length <= limit) return value;
   return `${value.slice(0, limit - 1).trimEnd()}…`;
@@ -100,6 +123,15 @@ function findingContainer(finding: TeamsFinding, index: number): Record<string, 
     spacing: 'Medium',
     items: [
       {
+        type: 'Input.Toggle',
+        id: `finding-reviewed-${index + 1}`,
+        title: 'Revisado',
+        value: 'false',
+        valueOn: 'true',
+        valueOff: 'false',
+        wrap: true,
+      },
+      {
         type: 'TextBlock',
         text: `${finding.category === 'risk' ? 'Risco' : 'Achado'} ${index + 1} · ${finding.title}`,
         weight: 'Bolder',
@@ -114,6 +146,11 @@ function findingContainer(finding: TeamsFinding, index: number): Record<string, 
         ],
       },
       ...(finding.line ? [{ type: 'TextBlock', text: `Linha: ${truncate(finding.line, 160)}`, isSubtle: true, size: 'Small', wrap: true, spacing: 'None' }] : []),
+      ...(finding.links?.length ? [{
+        type: 'ActionSet',
+        spacing: 'Small',
+        actions: finding.links.map((link) => ({ type: 'Action.OpenUrl', title: `Abrir ${link.title}`, url: link.url })),
+      }] : []),
       ...detailBlocks('Problema', finding.problem, 420),
       ...detailBlocks('Impacto', finding.impact, 280),
       ...detailBlocks('Correção', finding.correction, 320),
@@ -121,7 +158,7 @@ function findingContainer(finding: TeamsFinding, index: number): Record<string, 
   };
 }
 
-export function buildTeamsPayload(config: Config, result: WorkItemResult): Record<string, unknown> {
+function buildTeamsCard(config: Config, result: WorkItemResult): Record<string, unknown> {
   const itemUrl = `https://dev.azure.com/${encodeURIComponent(config.org)}/${encodeURIComponent(config.project)}/_workitems/edit/${result.item.id}`;
   const body: Record<string, unknown>[] = [{
     type: 'TextBlock',
@@ -146,7 +183,9 @@ export function buildTeamsPayload(config: Config, result: WorkItemResult): Recor
       spacing: 'Medium',
     });
     if (prUrl) actions.push({ type: 'Action.OpenUrl', title: `Abrir PR #${review.target.id}`, url: prUrl });
-    const findings = parseReviewFindings(review.markdown ?? '');
+    const findings = isReviewAnalysis(review.analysis)
+      ? review.analysis.findings.map((finding) => structuredFinding(config, review.target, finding))
+      : parseReviewFindings(review.markdown ?? '');
     for (const finding of findings) body.push(findingContainer(finding, findingIndex++));
     if (!findings.length && review.error) {
       body.push({ type: 'TextBlock', text: oneLine(review.error), color: 'Attention', wrap: true });
@@ -156,7 +195,7 @@ export function buildTeamsPayload(config: Config, result: WorkItemResult): Recor
     body.push({ type: 'TextBlock', text: 'Nenhum achado estruturado foi identificado.', isSubtle: true, wrap: true });
   }
   if (result.error) body.push({ type: 'TextBlock', text: oneLine(result.error), color: 'Attention', wrap: true, separator: true });
-  const card = {
+  return {
     $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
     type: 'AdaptiveCard',
     version: '1.2',
@@ -164,6 +203,9 @@ export function buildTeamsPayload(config: Config, result: WorkItemResult): Recor
     body,
     actions: actions.slice(0, 6),
   };
+}
+
+function wrapTeamsCard(config: Config, card: Record<string, unknown>): Record<string, unknown> {
   if (config.teamsPayloadFormat === 'adaptive-card') return card;
   return {
     type: 'message',
@@ -173,6 +215,57 @@ export function buildTeamsPayload(config: Config, result: WorkItemResult): Recor
       content: card,
     }],
   };
+}
+
+function payloadBytes(payload: Record<string, unknown>): number {
+  return Buffer.byteLength(JSON.stringify(payload), 'utf8');
+}
+
+export function buildTeamsPayloads(config: Config, result: WorkItemResult): Record<string, unknown>[] {
+  const fullCard = buildTeamsCard(config, result) as {
+    body: Record<string, unknown>[];
+    actions: Record<string, unknown>[];
+    [key: string]: unknown;
+  };
+  const fullPayload = wrapTeamsCard(config, fullCard);
+  if (payloadBytes(fullPayload) <= MAX_TEAMS_PAYLOAD_BYTES) return [fullPayload];
+
+  const header = fullCard.body[0] ?? { type: 'TextBlock', text: `Code Review · Work Item #${result.item.id}` };
+  const elements = fullCard.body.slice(1);
+  const cards: Record<string, unknown>[] = [];
+  let currentBody: Record<string, unknown>[] = [header];
+
+  const cardFor = (body: Record<string, unknown>[], page: number): Record<string, unknown> => ({
+    ...fullCard,
+    body: page === 0
+      ? body
+      : [{ ...header, text: `${String(header.text ?? 'Code Review')} · continuação ${page + 1}` }, ...body.slice(1)],
+    actions: page === 0 ? fullCard.actions : fullCard.actions.slice(0, 1),
+  });
+
+  for (const element of elements) {
+    const page = cards.length;
+    const candidateBody = [...currentBody, element];
+    const candidatePayload = wrapTeamsCard(config, cardFor(candidateBody, page));
+    if (payloadBytes(candidatePayload) > MAX_TEAMS_PAYLOAD_BYTES && currentBody.length > 1) {
+      cards.push(wrapTeamsCard(config, cardFor(currentBody, page)));
+      currentBody = [header, element];
+    } else {
+      currentBody = candidateBody;
+    }
+  }
+  if (currentBody.length > 1) cards.push(wrapTeamsCard(config, cardFor(currentBody, cards.length)));
+
+  for (const payload of cards) {
+    if (payloadBytes(payload) > MAX_TEAMS_PAYLOAD_BYTES) {
+      throw new Error('Um único achado excede o limite seguro de payload do Teams');
+    }
+  }
+  return cards;
+}
+
+export function buildTeamsPayload(config: Config, result: WorkItemResult): Record<string, unknown> {
+  return buildTeamsPayloads(config, result)[0]!;
 }
 
 export function buildNoWorkItemsPayload(config: Config): Record<string, unknown> {
@@ -220,7 +313,7 @@ export class TeamsService {
 
   async notify(result: WorkItemResult): Promise<void> {
     if (!this.shouldNotify(result)) return;
-    await this.post(buildTeamsPayload(this.config, result));
+    for (const payload of buildTeamsPayloads(this.config, result)) await this.post(payload);
   }
 
   async notifyNoWorkItems(): Promise<void> {
